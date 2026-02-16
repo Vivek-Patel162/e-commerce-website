@@ -1,0 +1,97 @@
+body {
+    font-family: Arial, sans-serif;
+    background: #f5f6fa;
+    padding: 20px;
+}
+
+h2 {
+    margin-bottom: 20px;
+    color: #333;
+}
+
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+}
+
+table th,
+table td {
+    border: 1px solid #ddd;
+    padding: 10px;
+    text-align: center;
+}
+
+table th {
+    background: #2f3640;
+    color: #fff;
+    font-weight: 600;
+    border-top-right-radius: 2px;
+    border-top-left-radius: 2px;
+}
+
+table tr:nth-child(even) {
+    background: #f9f9f9;
+}
+
+table tr:hover {
+    background: #f1f1f1;
+}
+
+button {
+    padding: 4px 10px;
+    border: none;
+    background: #40739e;
+    color: #fff;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+button:hover {
+    background: #273c75;
+}
+
+
+form[action] button[type="submit"] {
+    background: #e84118;
+}
+
+form[action] button[type="submit"]:hover {
+    background: #c23616;
+}
+
+
+table tr:last-child td {
+    font-size: 16px;
+    background: #dcdde1;
+}
+
+
+a {
+    display: inline-block;
+    margin-top: 20px;
+    text-decoration: none;
+    color: #40739e;
+    font-weight: 600;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+.cart-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 25px;
+}
+
+.cart-actions form button {
+    background: #44bd32;
+}
+
+.cart-actions form button:hover {
+    background: #2f9e44;
+}
