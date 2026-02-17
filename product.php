@@ -3,89 +3,154 @@ session_start();
 include "databaseconn.php";
 include "TopNav.php";
 
+class ProductPage
+{
+    private $conn;
+    private $status;
+    private $categoryId;
 
-/* ===============================
-   ADD TO CART  (SAME AS DASHBOARD)
-================================ */
+    public function __construct($conn, $status)
+    {
+        $this->conn = $conn;
+        $this->status = $status;
+        $this->categoryId = $_GET['category_id'] ?? null;
+    }
 
-if (isset($_POST['add_to_cart'])) {
+    /* ===============================
+       ADD TO CART
+    ================================ */
 
-    $product_id = intval($_POST['product_id']);
+    public function handleAddToCart()
+    {
+        if (!isset($_POST['add_to_cart'])) return;
 
-    // LOGGED IN USER → DATABASE CART
-    if (isset($_SESSION['userid']) || isset($_COOKIE['userid'])) {
+        $product_id = intval($_POST['product_id']);
 
-        $userid = $_SESSION['userid'] ?? $_COOKIE['userid'];
+        // LOGGED IN USER → DATABASE
+        if (isset($_SESSION['userid']) || isset($_COOKIE['userid'])) {
 
-        // Check cart exists
-        $checkCart = $conn->query("SELECT cart_id FROM cart WHERE user_id = $userid");
+            $userid = $_SESSION['userid'] ?? $_COOKIE['userid'];
 
-        if ($checkCart->num_rows > 0) {
-            $cartRow = $checkCart->fetch_assoc();
-            $cartId = $cartRow['cart_id'];
-        } else {
-            $conn->query("INSERT INTO cart (user_id) VALUES ($userid)");
-            $cartId = $conn->insert_id;
-        }
+            $checkCart = $this->conn->query(
+                "SELECT cart_id FROM cart WHERE user_id = $userid"
+            );
 
-        // Check product exists in cart
-        $checkProduct = $conn->query("
-            SELECT quantity FROM cart_items
-            WHERE cart_id = $cartId AND product_id = $product_id
-        ");
+            if ($checkCart->num_rows > 0) {
+                $cartRow = $checkCart->fetch_assoc();
+                $cartId = $cartRow['cart_id'];
+            } else {
+                $this->conn->query(
+                    "INSERT INTO cart (user_id) VALUES ($userid)"
+                );
+                $cartId = $this->conn->insert_id;
+            }
 
-        if ($checkProduct->num_rows > 0) {
-            $conn->query("
-                UPDATE cart_items
-                SET quantity = quantity + 1
+            $checkProduct = $this->conn->query("
+                SELECT quantity FROM cart_items
                 WHERE cart_id = $cartId AND product_id = $product_id
             ");
-        } else {
-            $conn->query("
-                INSERT INTO cart_items (cart_id, product_id, quantity)
-                VALUES ($cartId, $product_id, 1)
-            ");
+
+            if ($checkProduct->num_rows > 0) {
+                $this->conn->query("
+                    UPDATE cart_items
+                    SET quantity = quantity + 1
+                    WHERE cart_id = $cartId AND product_id = $product_id
+                ");
+            } else {
+                $this->conn->query("
+                    INSERT INTO cart_items (cart_id, product_id, quantity)
+                    VALUES ($cartId, $product_id, 1)
+                ");
+            }
         }
-    }
 
-    // GUEST USER → COOKIE / SESSION
-    else {
+        // GUEST USER → COOKIE / SESSION
+        else {
 
-        if ($status->isCookie()) {
+            if ($this->status->isCookie()) {
 
-            $cart = [];
+                $cart = [];
 
-            if (isset($_COOKIE['cart'])) {
-                $decoded = json_decode($_COOKIE['cart'], true);
-                if (is_array($decoded)) {
-                    $cart = $decoded;
+                if (isset($_COOKIE['cart'])) {
+                    $decoded = json_decode($_COOKIE['cart'], true);
+                    if (is_array($decoded)) {
+                        $cart = $decoded;
+                    }
                 }
+
+                $cart[$product_id] = ($cart[$product_id] ?? 0) + 1;
+                $cart_count = array_sum($cart);
+
+                setcookie("cart", json_encode($cart), time() + 600, "/");
+                setcookie("cart_count", $cart_count, time() + 600, "/");
+
+            } else {
+
+                if (!isset($_SESSION['cart'])) {
+                    $_SESSION['cart'] = [];
+                }
+
+                $_SESSION['cart'][$product_id] =
+                    ($_SESSION['cart'][$product_id] ?? 0) + 1;
+
+                $_SESSION['cart_count'] =
+                    array_sum($_SESSION['cart']);
             }
-
-            $cart[$product_id] = ($cart[$product_id] ?? 0) + 1;
-            $cart_count = array_sum($cart);
-
-            setcookie("cart", json_encode($cart), time() + 600, "/");
-            setcookie("cart_count", $cart_count, time() + 600, "/");
-
-        } else {
-
-            if (!isset($_SESSION['cart'])) {
-                $_SESSION['cart'] = [];
-            }
-
-            $_SESSION['cart'][$product_id] =
-                ($_SESSION['cart'][$product_id] ?? 0) + 1;
-
-            $_SESSION['cart_count'] =
-                array_sum($_SESSION['cart']);
         }
+
+        header("Location: product.php?category_id=" . $this->categoryId);
+        exit;
     }
 
-    header("Location: product.php?category_id=" . $_GET['category_id']);
-    exit;
+    /* ===============================
+       FETCH PRODUCTS
+    ================================ */
+
+    public function getProducts()
+    {
+        $sql = "WITH RECURSIVE category_tree AS (
+                    SELECT category_id
+                    FROM categories
+                    WHERE category_id = {$this->categoryId}
+
+                    UNION ALL
+
+                    SELECT c.category_id
+                    FROM categories c
+                    JOIN category_tree ct ON c.parent_id = ct.category_id
+                )
+                SELECT *
+                FROM products
+                WHERE category_id IN (
+                    SELECT category_id FROM category_tree
+                );";
+
+        $result = $this->conn->query($sql);
+
+        $products = [];
+
+        if ($result->num_rows > 0) {
+            while ($row = $result->fetch_assoc()) {
+                $products[] = $row;
+            }
+        }
+
+        return $products;
+    }
 }
+
+/* ===============================
+   EXECUTION
+================================ */
+
+$status = new Status();   // assuming already exists in project
+$page = new ProductPage($conn, $status);
+
+$page->handleAddToCart();
+$products = $page->getProducts();
+
 ?>
+
 
 <!DOCTYPE html>
 <html lang="en">
