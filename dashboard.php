@@ -1,210 +1,236 @@
 <?php
 session_start();
-/* ===============================
-   COOKIE ACCEPT / REJECT
-================================ */
-
-if (isset($_POST['cookie_action'])) {
-
-    if ($_POST['cookie_action'] === 'accept') {
-
-        // Save consent
-        setcookie("cookie_consent", "accepted", time() + 600, "/");
-        setcookie("active", "true", time() + 600, "/");
-
-
-        if (!empty($_SESSION['cart'])) {
-
-            $sessionCart = $_SESSION['cart'];
-
-            // If cookie cart already exists → merge
-            $cookieCart = [];
-
-            if (isset($_COOKIE['cart'])) {
-                $decoded = json_decode($_COOKIE['cart'], true);
-                if (is_array($decoded)) {
-                    $cookieCart = $decoded;
-                }
-            }
-
-            foreach ($sessionCart as $pid => $qty) {
-                $cookieCart[$pid] = ($cookieCart[$pid] ?? 0) + $qty;
-            }
-
-            $cart_count = array_sum($cookieCart);
-
-            setcookie("cart", json_encode($cookieCart), time() + 600, "/");
-            setcookie("cart_count", $cart_count, time() + 600, "/");
-
-            unset($_SESSION['cart']);
-            unset($_SESSION['cart_count']);
-        }
-    }
-
-    if ($_POST['cookie_action'] === 'reject') {
-
-        setcookie("cookie_consent", "rejected", time() + 600, "/");
-        setcookie("active", "false", time() + 600, "/");
-
-        // Optional: clear cookie cart if rejecting
-        setcookie("cart", "", time() - 3600, "/");
-        setcookie("cart_count", "", time() - 3600, "/");
-    }
-
-    header("Location: " . $_SERVER['PHP_SELF']);
-    exit;
-}
-
 include "databaseconn.php";
 include "isSessCoo.php";
 
 $status = new Status();
 
 /* ===============================
-   LOGIN / LOGOUT
+   MAIN DASHBOARD CLASS
 ================================ */
 
-if ($_SERVER['REQUEST_METHOD'] == "POST" && isset($_POST['login'])) {
-    header("Location: login.php");
-    exit;
-}
+class Dashboard {
 
-if ($_SERVER['REQUEST_METHOD'] == "POST" && isset($_POST['logout'])) {
+    private $conn;
+    private $status;
+    public $cartCount = 0;
+    public $products = [];
 
-    $status->unsetCookie();
-    $status->unsetSession();
+    public function __construct($conn, $status) {
+        $this->conn = $conn;
+        $this->status = $status;
+    }
 
-    // Clear cookie consent
-    setcookie("cookie_consent", "", time() - 3600, "/");
-    setcookie("active", "", time() - 3600, "/");
-    setcookie("cart", "", time() - 3600, "/");
-    setcookie("cart_count", "", time() - 3600, "/");
+    /* ===============================
+       COOKIE ACCEPT / REJECT
+    ================================= */
+    public function handleCookie() {
 
-    header("Location: dashboard.php");
-    exit;
-}
+        if (!isset($_POST['cookie_action'])) return;
 
-/* ===============================
-   ADD TO CART
-================================ */
+        if ($_POST['cookie_action'] === 'accept') {
 
-if (isset($_POST['add_to_cart'])) {
+            setcookie("cookie_consent", "accepted", time() + 600, "/");
+            setcookie("active", "true", time() + 600, "/");
 
-    $product_id = intval($_POST['product_id']);
+            if (!empty($_SESSION['cart'])) {
 
-    // LOGGED IN USER → DATABASE CART
-    if (isset($_SESSION['userid']) || isset($_COOKIE['userid'])) {
+                $sessionCart = $_SESSION['cart'];
+                $cookieCart = [];
 
-        $userid = $_SESSION['userid'] ?? $_COOKIE['userid'];
+                if (isset($_COOKIE['cart'])) {
+                    $decoded = json_decode($_COOKIE['cart'], true);
+                    if (is_array($decoded)) {
+                        $cookieCart = $decoded;
+                    }
+                }
 
-        // Check cart exists
-        $checkCart = $conn->query("SELECT cart_id FROM cart WHERE user_id = $userid");
+                foreach ($sessionCart as $pid => $qty) {
+                    $cookieCart[$pid] = ($cookieCart[$pid] ?? 0) + $qty;
+                }
 
-        if ($checkCart->num_rows > 0) {
-            $cartRow = $checkCart->fetch_assoc();
-            $cartId = $cartRow['cart_id'];
-        } else {
-            $conn->query("INSERT INTO cart (user_id) VALUES ($userid)");
-            $cartId = $conn->insert_id;
+                $cart_count = array_sum($cookieCart);
+
+                setcookie("cart", json_encode($cookieCart), time() + 600, "/");
+                setcookie("cart_count", $cart_count, time() + 600, "/");
+
+                unset($_SESSION['cart']);
+                unset($_SESSION['cart_count']);
+            }
         }
 
-        // Check product exists in cart
-        $checkProduct = $conn->query("
-            SELECT quantity FROM cart_items
-            WHERE cart_id = $cartId AND product_id = $product_id
-        ");
+        if ($_POST['cookie_action'] === 'reject') {
 
-        if ($checkProduct->num_rows > 0) {
-            $conn->query("
-                UPDATE cart_items
-                SET quantity = quantity + 1
+            setcookie("cookie_consent", "rejected", time() + 600, "/");
+            setcookie("active", "false", time() + 600, "/");
+
+            setcookie("cart", "", time() - 3600, "/");
+            setcookie("cart_count", "", time() - 3600, "/");
+        }
+
+        header("Location: " . $_SERVER['PHP_SELF']);
+        exit;
+    }
+
+    /* ===============================
+       LOGIN / LOGOUT
+    ================================= */
+    public function handleAuth() {
+
+        if ($_SERVER['REQUEST_METHOD'] == "POST" && isset($_POST['login'])) {
+            header("Location: login.php");
+            exit;
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] == "POST" && isset($_POST['logout'])) {
+
+            $this->status->unsetCookie();
+            $this->status->unsetSession();
+
+            setcookie("cookie_consent", "", time() - 3600, "/");
+            setcookie("active", "", time() - 3600, "/");
+            setcookie("cart", "", time() - 3600, "/");
+            setcookie("cart_count", "", time() - 3600, "/");
+
+            header("Location: dashboard.php");
+            exit;
+        }
+    }
+
+    /* ===============================
+       ADD TO CART
+    ================================= */
+    public function handleAddToCart() {
+
+        if (!isset($_POST['add_to_cart'])) return;
+
+        $product_id = intval($_POST['product_id']);
+
+        if (isset($_SESSION['userid']) || isset($_COOKIE['userid'])) {
+
+            $userid = $_SESSION['userid'] ?? $_COOKIE['userid'];
+
+            $checkCart = $this->conn->query("SELECT cart_id FROM cart WHERE user_id = $userid");
+
+            if ($checkCart->num_rows > 0) {
+                $cartRow = $checkCart->fetch_assoc();
+                $cartId = $cartRow['cart_id'];
+            } else {
+                $this->conn->query("INSERT INTO cart (user_id) VALUES ($userid)");
+                $cartId = $this->conn->insert_id;
+            }
+
+            $checkProduct = $this->conn->query("
+                SELECT quantity FROM cart_items
                 WHERE cart_id = $cartId AND product_id = $product_id
             ");
+
+            if ($checkProduct->num_rows > 0) {
+                $this->conn->query("
+                    UPDATE cart_items
+                    SET quantity = quantity + 1
+                    WHERE cart_id = $cartId AND product_id = $product_id
+                ");
+            } else {
+                $this->conn->query("
+                    INSERT INTO cart_items (cart_id, product_id, quantity)
+                    VALUES ($cartId, $product_id, 1)
+                ");
+            }
         } else {
-            $conn->query("
-                INSERT INTO cart_items (cart_id, product_id, quantity)
-                VALUES ($cartId, $product_id, 1)
-            ");
-        }
-    }
 
-    // GUEST USER → COOKIE / SESSION
-    else {
+            if ($this->status->isCookie()) {
 
-        if ($status->isCookie()) {
+                $cart = [];
 
-            $cart = [];
-
-            if (isset($_COOKIE['cart'])) {
-                $decoded = json_decode($_COOKIE['cart'], true);
-                if (is_array($decoded)) {
-                    $cart = $decoded;
+                if (isset($_COOKIE['cart'])) {
+                    $decoded = json_decode($_COOKIE['cart'], true);
+                    if (is_array($decoded)) {
+                        $cart = $decoded;
+                    }
                 }
+
+                $cart[$product_id] = ($cart[$product_id] ?? 0) + 1;
+                $cart_count = array_sum($cart);
+
+                setcookie("cart", json_encode($cart), time() + 600, "/");
+                setcookie("cart_count", $cart_count, time() + 600, "/");
+            } else {
+
+                if (!isset($_SESSION['cart'])) {
+                    $_SESSION['cart'] = [];
+                }
+
+                $_SESSION['cart'][$product_id] =
+                    ($_SESSION['cart'][$product_id] ?? 0) + 1;
+
+                $_SESSION['cart_count'] =
+                    array_sum($_SESSION['cart']);
             }
+        }
 
-            $cart[$product_id] = ($cart[$product_id] ?? 0) + 1;
-            $cart_count = array_sum($cart);
+        header("Location: dashboard.php");
+        exit;
+    }
 
-            setcookie("cart", json_encode($cart), time() + 600, "/");
-            setcookie("cart_count", $cart_count, time() + 600, "/");
+    /* ===============================
+       GET CART COUNT
+    ================================= */
+    public function getCartCount() {
+
+        if (isset($_SESSION['userid']) || isset($_COOKIE['userid'])) {
+
+            $userid = $_SESSION['userid'] ?? $_COOKIE['userid'];
+
+            $countQuery = $this->conn->query("
+                SELECT SUM(ci.quantity) as total
+                FROM cart c
+                JOIN cart_items ci ON c.cart_id = ci.cart_id
+                WHERE c.user_id = $userid
+            ");
+
+            if ($countQuery && $countQuery->num_rows > 0) {
+                $row = $countQuery->fetch_assoc();
+                $this->cartCount = $row['total'] ?? 0;
+            }
         } else {
 
-            if (!isset($_SESSION['cart'])) {
-                $_SESSION['cart'] = [];
-            }
-
-            $_SESSION['cart'][$product_id] =
-                ($_SESSION['cart'][$product_id] ?? 0) + 1;
-
-            $_SESSION['cart_count'] =
-                array_sum($_SESSION['cart']);
+            $this->cartCount =
+                $_SESSION['cart_count'] ??
+                ($_COOKIE['cart_count'] ?? 0);
         }
     }
 
-    header("Location: dashboard.php");
-    exit;
-}
+    /* ===============================
+       GET PRODUCTS
+    ================================= */
+    public function getProducts() {
 
-/* ===============================
-   GET CART COUNT (ICON)
-================================ */
+        $sql = "SELECT * FROM products";
+        $result = $this->conn->query($sql);
 
-$cartCount = 0;
-
-if (isset($_SESSION['userid']) || isset($_COOKIE['userid'])) {
-
-    $userid = $_SESSION['userid'] ?? $_COOKIE['userid'];
-
-    $countQuery = $conn->query("
-        SELECT SUM(ci.quantity) as total
-        FROM cart c
-        JOIN cart_items ci ON c.cart_id = ci.cart_id
-        WHERE c.user_id = $userid
-    ");
-
-    if ($countQuery && $countQuery->num_rows > 0) {
-        $row = $countQuery->fetch_assoc();
-        $cartCount = $row['total'] ?? 0;
+        while ($row = $result->fetch_assoc()) {
+            $this->products[] = $row;
+        }
     }
-} else {
-
-    $cartCount =
-        $_SESSION['cart_count'] ??
-        ($_COOKIE['cart_count'] ?? 0);
 }
 
 /* ===============================
-   GET PRODUCTS
+   INITIALIZE DASHBOARD
 ================================ */
 
-$sql = "SELECT * FROM products";
-$result = $conn->query($sql);
+$dashboard = new Dashboard($conn, $status);
 
-$products = [];
-while ($row = $result->fetch_assoc()) {
-    $products[] = $row;
-}
+$dashboard->handleCookie();
+$dashboard->handleAuth();
+$dashboard->handleAddToCart();
+$dashboard->getCartCount();
+$dashboard->getProducts();
+
+$cartCount = $dashboard->cartCount;
+$products = $dashboard->products;
 ?>
+
 
 <!DOCTYPE html>
 <html>

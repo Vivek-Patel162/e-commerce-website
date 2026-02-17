@@ -2,81 +2,191 @@
 session_start();
 require_once "../4Feb/databaseconn.php";
 include "isSessCoo.php";
-$status=new Status();
-
-$cart = [];
 
 /* ===============================
-   CHECK CART SOURCE
-================================ */
+   CLASSES
+=============================== */
 
-//  LOGGED IN USER → DATABASE
-if (isset($_SESSION['userid']) || isset($_COOKIE['userid'])) {
+class User
+{
+    private $conn;
+    public $id;
+    public $name;
+    public $phone;
+    public $email;
 
-    $userid = $_SESSION['userid'] ?? $_COOKIE['userid'];
+    public function __construct($conn)
+    {
+        $this->conn = $conn;
+        $this->initUser();
+    }
 
-    $sqlCart = "
-        SELECT ci.product_id, ci.quantity
-        FROM cart c
-        JOIN cart_items ci ON c.cart_id = ci.cart_id
-        WHERE c.user_id = $userid
-    ";
+    private function initUser()
+    {
+        if (isset($_COOKIE['email'])) {
+            $this->email = $_COOKIE['email'];
+        } elseif (isset($_SESSION['email'])) {
+            $this->email = $_SESSION['email'];
+        }
 
-    $resultCart = $conn->query($sqlCart);
-
-    if ($resultCart && $resultCart->num_rows > 0) {
-        while ($row = $resultCart->fetch_assoc()) {
-            $cart[$row['product_id']] = $row['quantity'];
+        if ($this->email) {
+            $sql = "SELECT user_id, name, phone FROM users WHERE email='" . $this->email . "'";
+            $result = $this->conn->query($sql);
+            if ($result && $result->num_rows > 0) {
+                $row = $result->fetch_assoc();
+                $this->id = $row['user_id'];
+                $this->name = $row['name'];
+                $this->phone = $row['phone'];
+            }
         }
     }
 }
 
-//  GUEST SESSION
-elseif (isset($_SESSION['cart'])) {
-    $cart = $_SESSION['cart'];
+class Cart
+{
+    private $conn;
+    private $userId;
+    public $items = []; // product_id => quantity
+
+    public function __construct($conn, $userId = null)
+    {
+        $this->conn = $conn;
+        $this->userId = $userId;
+        $this->loadCart();
+    }
+
+    private function loadCart()
+    {
+        // Logged-in user → database
+        if ($this->userId) {
+            $sql = "SELECT ci.product_id, ci.quantity
+                    FROM cart c
+                    JOIN cart_items ci ON c.cart_id = ci.cart_id
+                    WHERE c.user_id = $this->userId";
+            $result = $this->conn->query($sql);
+            if ($result && $result->num_rows > 0) {
+                while ($row = $result->fetch_assoc()) {
+                    $this->items[$row['product_id']] = $row['quantity'];
+                }
+            }
+        }
+        // Guest session
+        elseif (isset($_SESSION['cart'])) {
+            $this->items = $_SESSION['cart'];
+        }
+        // Guest cookie
+        elseif (isset($_COOKIE['cart'])) {
+            $this->items = json_decode($_COOKIE['cart'], true);
+        }
+    }
+
+    public function isEmpty(): bool
+    {
+        return empty($this->items);
+    }
+
+    public function getProducts()
+    {
+        if ($this->isEmpty()) return [];
+
+        $product_ids = implode(",", array_keys($this->items));
+        $sql = "SELECT * FROM products WHERE product_id IN ($product_ids)";
+        $result = $this->conn->query($sql);
+        $products = [];
+        if ($result) {
+            while ($row = $result->fetch_assoc()) {
+                $products[$row['product_id']] = $row;
+            }
+        }
+        return $products;
+    }
+
+    public function clear()
+    {
+        if ($this->userId) {
+            $this->conn->query("DELETE ci FROM cart_items ci
+                                JOIN cart c ON ci.cart_id = c.cart_id
+                                WHERE c.user_id = $this->userId");
+        } elseif (isset($_SESSION['cart'])) {
+            unset($_SESSION['cart'], $_SESSION['cart_count']);
+        } elseif (isset($_COOKIE['cart'])) {
+            setcookie("cart", "", time() - 3600, "/");
+            setcookie("cart_count", "", time() - 3600, "/");
+        }
+    }
 }
 
-// GUEST COOKIE
-elseif (isset($_COOKIE['cart'])) {
-    $cart = json_decode($_COOKIE['cart'], true);
+class Order
+{
+    private $conn;
+    private $userId;
+    private $cart;
+    public $grandTotal = 0;
+
+    public function __construct($conn, $userId, Cart $cart)
+    {
+        $this->conn = $conn;
+        $this->userId = $userId;
+        $this->cart = $cart;
+    }
+
+    public function placeOrder($paymentMethod)
+    {
+        $products = $this->cart->getProducts();
+        if (empty($products)) return false;
+
+        // Calculate grand total
+        foreach ($products as $pid => $product) {
+            $qty = $this->cart->items[$pid];
+            $this->grandTotal += $product['price'] * $qty;
+        }
+
+        // Insert into orders table
+        $sqlOrder = "INSERT INTO orders(user_id, total_amount, payment_method)
+                     VALUES ($this->userId, $this->grandTotal, '$paymentMethod')";
+        if ($this->conn->query($sqlOrder)) {
+            $orderId = $this->conn->insert_id;
+
+            // Prepare order_items insert
+            $values = [];
+            foreach ($products as $pid => $product) {
+                $qty = $this->cart->items[$pid];
+                $subtotal = $product['price'] * $qty;
+                $values[] = "($orderId, $pid, $qty, {$product['price']}, $subtotal)";
+            }
+
+            $sqlItems = "INSERT INTO order_items(order_id, product_id, quantity, price, subtotal)
+                         VALUES " . implode(",", $values);
+
+            if ($this->conn->query($sqlItems)) {
+                $this->cart->clear();
+                return true;
+            }
+        }
+        return false;
+    }
 }
 
-//  EMPTY CART
-if (empty($cart)) {
+/* ===============================
+   PAGE LOGIC
+=============================== */
+
+$status = new Status();
+$user = new User($conn);
+$cart = new Cart($conn, $user->id);
+
+if ($cart->isEmpty()) {
     echo "<h2>Your cart is empty</h2>";
     exit;
 }
 
-$product_ids = implode(",", array_keys($cart));
-
-
-
-$sql = "SELECT * FROM products WHERE product_id IN ($product_ids)";
-$result = $conn->query($sql);
-
-if (isset($_COOKIE['email'])) {
-    $email = $_COOKIE['email'];
-} elseif (isset($_SESSION['email'])) {
-    $email = $_SESSION['email'];
+$products = $cart->getProducts();
+$grandTotal = 0;
+foreach ($products as $pid => $product) {
+    $grandTotal += $product['price'] * $cart->items[$pid];
 }
-
-if (isset($email)) {
-
-    $sql2 = "SELECT name,phone,user_id FROM users WHERE email='" . $email . "'";
-    $result2 = $conn->query($sql2);
-
-    if ($result2->num_rows > 0) {
-        $row1 = $result2->fetch_assoc();
-        $name = $row1['name'];
-        $phone = $row1['phone'];
-        $userid = $row1['user_id'];
-    }
-}
-
 
 $errors = [];
-$dataOrder = [];
-$grandTotal = 0;
 ?>
 
 <!DOCTYPE html>
@@ -85,7 +195,7 @@ $grandTotal = 0;
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>Checkout</title>
     <link rel="stylesheet" href="checkout.css">
 </head>
 
@@ -93,218 +203,77 @@ $grandTotal = 0;
     <h1>Order Confirmation</h1>
     <form method="POST">
         Name:
-        <input type="text" name="name" value="<?= htmlspecialchars($name) ?>">
-        <span style="color:red">
-            <?= $errors['name'] ?? '' ?>
-        </span><br><br>
+        <input type="text" name="name" value="<?= htmlspecialchars($user->name) ?>">
+        <span style="color:red"><?= $errors['name'] ?? '' ?></span><br><br>
+
         Phone:
-        <input type="text" name="phone" value="<?= htmlspecialchars($phone) ?>">
-        <span style="color:red">
-            <?= $errors['phone'] ?? '' ?>
-        </span><br><br>
-
-
+        <input type="text" name="phone" value="<?= htmlspecialchars($user->phone) ?>">
+        <span style="color:red"><?= $errors['phone'] ?? '' ?></span><br><br>
 
         Delivery Address:
         <input type="text" name="address">
-        <span style="color:red">
-            <?= $errors['address'] ?? '' ?>
-        </span><br><br>
+        <span style="color:red"><?= $errors['address'] ?? '' ?></span><br><br>
 
         Payment Method:
-        <br>
         <select name="paymentMethod">
             <option value="Cash on Delivery">Cash on Delivery</option>
             <option value="Net Banking">Net Banking</option>
-        </select>
-        <br><br>
-
+        </select><br><br>
 
         <table cellpadding="10">
             <tr>
-                <th>image</th>
+                <th>Image</th>
                 <th>Product</th>
                 <th>Price</th>
                 <th>Quantity</th>
                 <th>Total</th>
-
             </tr>
-
-            <?php
-
-
-            while ($row = $result->fetch_assoc()) {
-                $dataOrder[$row['product_id']][] = $row;
-                $qty = $cart[$row['product_id']] ?? 0;
-
-                $total = $row['price'] * $qty;
-
-                $grandTotal += $total;
+            <?php foreach ($products as $pid => $product): 
+                $qty = $cart->items[$pid];
+                $total = $product['price'] * $qty;
             ?>
-
-                <tr>
-                    <td>
-                        <img src="/PracticePhp/4Feb/images/<?= $row['image'] ?>" alt="image" width="80">
-                    <td><?= $row['product_name'] ?></td>
-                    <td>₹<?= $row['price'] ?></td>
-
-                    <td> <?= $qty ?></td>
-                    <td>₹<?= $total ?></td>
-                </tr>
-
-            <?php } ?>
-
-            <br><br>
-
+            <tr>
+                <td><img src="/PracticePhp/4Feb/images/<?= $product['image'] ?>" width="80"></td>
+                <td><?= $product['product_name'] ?></td>
+                <td>₹<?= $product['price'] ?></td>
+                <td><?= $qty ?></td>
+                <td>₹<?= $total ?></td>
+            </tr>
+            <?php endforeach; ?>
             <tr>
                 <td colspan="4"><strong>Grand Total</strong></td>
                 <td><strong>₹<?= $grandTotal ?></strong></td>
             </tr>
-
         </table>
         <button type="submit" name="confirm">Confirm Order</button>
     </form>
 
     <?php
     if (isset($_POST['confirm'])) {
-
         $name = trim($_POST['name'] ?? '');
         $phone = trim($_POST['phone'] ?? '');
         $address = trim($_POST['address'] ?? '');
-        $paymentmethod = trim($_POST['paymentMethod'] ?? '');
+        $paymentMethod = trim($_POST['paymentMethod'] ?? '');
 
+        if ($name === "") $errors['name'] = "Name is required";
+        elseif (!preg_match("/^[a-zA-Z-' ]{3,}$/", $name)) $errors['name'] = "Name should be at least 3 letters";
 
+        if ($phone === "") $errors['phone'] = "Phone is required";
+        elseif (!preg_match("/^[6-9]\d{9}$/", $phone)) $errors['phone'] = "Phone must be 10 digits";
 
-        if ($name === "") {
-            $errors['name'] = "Name is required";
-        } elseif (!preg_match("/^[a-zA-Z-' ]{3,}$/", $name)) {
-            $errors['name'] = "Name should be at least 3 characters long and contain only letters";
-        }
+        if ($address === "") $errors['address'] = "Address is required";
 
-        if (empty($phone)) {
-            $errors['phone'] = "Phone number is required";
-        } elseif (!preg_match("/^[6-9]\d{9}$/", $phone)) {
-            $errors['phone'] = "Phone number must be exactly 10 digits";
-        }
-        if ($address === "") {
-            $errors['address'] = "Address is required";
-        }
-
-        $sql = "insert into orders(user_id,total_amount,payment_method)values($userid,$grandTotal,'$paymentmethod')";
-        if ($conn->query($sql)) {
-
-            $lastid = $conn->insert_id;
-
-
-            $values = "";
-
-
-
-             /* ===============================
-        THIS BLOCK HERE
-       DATABASE CART SUPPORT
-    =============================== */
-
-    if (isset($_SESSION['userid']) || isset($_COOKIE['userid'])) {
-
-        $userid = $_SESSION['userid'] ?? $_COOKIE['userid'];
-
-        $sqlCart = "
-            SELECT ci.product_id, ci.quantity, p.price
-            FROM cart c
-            JOIN cart_items ci ON c.cart_id = ci.cart_id
-            JOIN products p ON p.product_id = ci.product_id
-            WHERE c.user_id = $userid
-        ";
-
-        $resultCart = $conn->query($sqlCart);
-
-        while ($row = $resultCart->fetch_assoc()) {
-
-            $pid = $row['product_id'];
-            $qty = $row['quantity'];
-            $price = $row['price'];
-            $subtotal = $price * $qty;
-
-            $values .= "($lastid,$pid,$qty,$price,$subtotal),";
-        }
-
-        $values = rtrim($values, ',');
-
-        $sqlInsert = "INSERT INTO order_items (order_id, product_id, quantity, price, subtotal)
-                      VALUES $values";
-
-        if ($conn->query($sqlInsert)) {
-
-           // Clear database cart
-        $conn->query("DELETE ci FROM cart_items ci
-                      JOIN cart c ON ci.cart_id = c.cart_id
-                      WHERE c.user_id = $userid");
-
-        header("Location: dashboard.php");
-        exit;
-        }
-    }
-
-    /* ===============================
-       YOUR EXISTING COOKIE / SESSION
-       CODE CONTINUES BELOW
-    =============================== */
-
-
-
-            if (isset($_COOKIE['cart'])) {
-
-                $cart = json_decode($_COOKIE['cart'], true);
-                $values = "";
-
-                foreach ($cart as $pid => $qty) {
-                    $price = $dataOrder[$pid][0]['price'];
-                    $subtotal = $price * $qty;
-                    $values .= "($lastid,$pid,$qty,$price,$subtotal),";
-                }
-
-                $values = rtrim($values, ',');
-
-                $sql = "INSERT INTO order_items (order_id, product_id, quantity, price, subtotal)
-            VALUES $values";
-
-                if ($conn->query($sql)) {
-                    setcookie("cart", "", time() - 3600, "/");
-                    setcookie("cart_count", "", time() - 3600, "/");
-
-                    header("Location: dashboard.php");
-                    exit;
-                }
-            } elseif (isset($_SESSION['cart'])) {
-
-                $values = "";
-
-                foreach ($_SESSION['cart'] as $pid => $qty) {
-                    $price = $dataOrder[$pid][0]['price'];
-                    $subtotal = $price * $qty;
-                    $values .= "($lastid,$pid,$qty,$price,$subtotal),";
-                }
-
-                $values = rtrim($values, ',');
-
-                $sql = "INSERT INTO order_items (order_id, product_id, quantity, price, subtotal)
-            VALUES $values";
-
-                if ($conn->query($sql)) {
-                   
-                    unset($_SESSION['cart']);
-                    unset($_SESSION['cart_count']);
-                    header("Location: dashboard.php");
-                    exit;
-                }
+        if (empty($errors)) {
+            $order = new Order($conn, $user->id, $cart);
+            if ($order->placeOrder($paymentMethod)) {
+                header("Location: dashboard.php");
+                exit;
+            } else {
+                echo "<p>Something went wrong placing the order.</p>";
             }
         }
-        echo "something went wrong";
     }
-
     ?>
     <a href="cart.php">← Back to cart page</a>
 </body>
-
 </html>

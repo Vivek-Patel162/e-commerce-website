@@ -1,236 +1,249 @@
 <?php
 session_start();
-include "../4Feb/databaseconn.php";
+require_once "../4Feb/databaseconn.php";
 include "isSessCoo.php";
 
+class CartManager
+{
+    private $conn;
+    private $status;
+    private $userid = null;
+    private $cartId = null;
+    private $dbCart = [];
+    private $currentCart = [];
+
+    public function __construct($conn, $status)
+    {
+        $this->conn = $conn;
+        $this->status = $status;
+        $this->initUser();
+        $this->loadDatabaseCart();
+        $this->loadGuestCart();
+    }
+
+    /* ================= USER CHECK ================= */
+
+    private function initUser()
+    {
+        if (isset($_SESSION['userid']) || isset($_COOKIE['userid'])) {
+            $this->userid = ($this->status->cookieorsess() === "session")
+                ? $_SESSION['userid']
+                : $_COOKIE['userid'];
+        }
+    }
+
+    public function getUserId()
+    {
+        return $this->userid;
+    }
+
+    /* ================= DATABASE CART ================= */
+
+    private function loadDatabaseCart()
+    {
+        if ($this->userid) {
+
+            $sql = "SELECT c.cart_id, ci.product_id, ci.quantity
+                    FROM cart c
+                    JOIN cart_items ci ON c.cart_id = ci.cart_id
+                    WHERE c.user_id = $this->userid";
+
+            $result = $this->conn->query($sql);
+
+            while ($row = $result->fetch_assoc()) {
+                $this->dbCart[$row['product_id']] = $row['quantity'];
+                $this->cartId = $row['cart_id'];
+            }
+        }
+    }
+
+    /* ================= GUEST CART ================= */
+
+    private function loadGuestCart()
+    {
+        if (!$this->userid) {
+            if (!empty($_SESSION['cart'])) {
+                $this->currentCart = $_SESSION['cart'];
+            } elseif (!empty($_COOKIE['cart'])) {
+                $this->currentCart = json_decode($_COOKIE['cart'], true);
+            }
+        }
+    }
+
+    /* ================= HANDLE ACTION ================= */
+
+    public function handleActions()
+    {
+        if (!isset($_POST['action'], $_POST['product_id'])) return;
+
+        $pid = $_POST['product_id'];
+
+        // Logged-in user
+        if ($this->userid) {
+
+            if ($_POST['action'] === 'plus') {
+                $this->conn->query("UPDATE cart_items
+                                    SET quantity = quantity + 1
+                                    WHERE cart_id = $this->cartId
+                                    AND product_id = $pid");
+            }
+
+            if ($_POST['action'] === 'minus') {
+                $this->conn->query("UPDATE cart_items
+                                    SET quantity = quantity - 1
+                                    WHERE cart_id = $this->cartId
+                                    AND product_id = $pid");
+
+                $this->conn->query("DELETE FROM cart_items
+                                    WHERE cart_id = $this->cartId
+                                    AND product_id = $pid
+                                    AND quantity <= 0");
+            }
+
+            if ($_POST['action'] === 'remove') {
+                $this->conn->query("DELETE FROM cart_items
+                                    WHERE cart_id = $this->cartId
+                                    AND product_id = $pid");
+            }
+
+            header("Location: cart.php");
+            exit;
+        }
+
+        // Guest user
+        else {
+
+            if ($_POST['action'] === 'plus') {
+
+                if (isset($_SESSION['cart'])) {
+                    $_SESSION['cart_count']++;
+                    $_SESSION['cart'][$pid] = ($_SESSION['cart'][$pid] ?? 0) + 1;
+                } elseif (isset($_COOKIE['cart'])) {
+
+                    $cart = json_decode($_COOKIE['cart'], true);
+                    $cart[$pid] = ($cart[$pid] ?? 0) + 1;
+                    $cart_count = $_COOKIE['cart_count'] + 1;
+
+                    setcookie("cart_count", $cart_count, time() + 600, "/");
+                    setcookie("cart", json_encode($cart), time() + 600, "/");
+                }
+            }
+
+            if ($_POST['action'] === 'minus') {
+
+                if (isset($_SESSION['cart'])) {
+
+                    $_SESSION['cart'][$pid]--;
+                    $_SESSION['cart_count']--;
+
+                    if ($_SESSION['cart'][$pid] <= 0) {
+                        unset($_SESSION['cart'][$pid]);
+                    }
+
+                } elseif (isset($_COOKIE['cart'])) {
+
+                    $cart = json_decode($_COOKIE['cart'], true);
+
+                    if (isset($cart[$pid])) {
+
+                        $cart[$pid]--;
+
+                        if ($cart[$pid] <= 0) {
+                            unset($cart[$pid]);
+                        }
+
+                        $cart_count = $_COOKIE['cart_count'] - 1;
+                        if ($cart_count < 0) $cart_count = 0;
+
+                        setcookie("cart", json_encode($cart), time() + 600, "/");
+                        setcookie("cart_count", $cart_count, time() + 600, "/");
+                    }
+                }
+            }
+
+            if ($_POST['action'] === 'remove') {
+
+                if (isset($_SESSION['cart'])) {
+
+                    $_SESSION['cart_count'] -= $_SESSION['cart'][$pid];
+                    unset($_SESSION['cart'][$pid]);
+
+                } elseif (isset($_COOKIE['cart'])) {
+
+                    $cart = json_decode($_COOKIE['cart'], true);
+
+                    if (isset($cart[$pid])) {
+
+                        unset($cart[$pid]);
+                        $cart_count = array_sum($cart);
+
+                        setcookie("cart", json_encode($cart), time() + 600, "/");
+                        setcookie("cart_count", $cart_count, time() + 600, "/");
+                    }
+                }
+            }
+
+            header("Location: cart.php");
+            exit;
+        }
+    }
+
+    /* ================= FETCH CART ================= */
+
+    public function fetchCart()
+    {
+        if ($this->userid && $this->cartId) {
+
+            $sql = "SELECT p.*, ci.quantity
+                    FROM cart_items ci
+                    JOIN products p ON ci.product_id = p.product_id
+                    WHERE ci.cart_id = $this->cartId";
+
+            return $this->conn->query($sql);
+
+        } elseif (!$this->userid && !empty($this->currentCart)) {
+
+            $ids = implode(",", array_keys($this->currentCart));
+            $sql = "SELECT * FROM products WHERE product_id IN ($ids)";
+            return $this->conn->query($sql);
+        }
+
+        return null;
+    }
+
+    public function getGuestCart()
+    {
+        return $this->currentCart;
+    }
+}
+
+/* ============================
+   PAGE EXECUTION
+============================ */
+
 $status = new Status();
+$cartManager = new CartManager($conn, $status);
 
-/* =====================================
-   USER CHECK (MODIFIED - no exit)
-===================================== */
-
-$userid = null;
-
-if (isset($_SESSION['userid']) || isset($_COOKIE['userid'])) {
-    $userid = ($status->cookieorsess() === "session")
-        ? $_SESSION['userid']
-        : $_COOKIE['userid'];
-}
-
-/* =====================================
-   STEP 1: GET DATABASE CART (ONLY IF LOGGED IN)
-===================================== */
-
-$dbCart = [];
-$cartId = null;
-
-if ($userid) {
-
-    $sql = "SELECT c.cart_id, ci.product_id, ci.quantity
-            FROM cart c
-            JOIN cart_items ci ON c.cart_id = ci.cart_id
-            WHERE c.user_id = $userid";
-
-    $result = $conn->query($sql);
-
-    while ($row = $result->fetch_assoc()) {
-        $dbCart[$row['product_id']] = $row['quantity'];
-        $cartId = $row['cart_id'];
-    }
-}
-
-/* =====================================
-   STEP 2: GET GUEST CART
-===================================== */
-
-$currentCart = [];
-
-if (!$userid) {
-    if (!empty($_SESSION['cart'])) {
-        $currentCart = $_SESSION['cart'];
-    } elseif (!empty($_COOKIE['cart'])) {
-        $currentCart = json_decode($_COOKIE['cart'], true);
-    }
-}
-
-/* =====================================
-   STEP 3: HANDLE PLUS / MINUS / REMOVE
-   (ONLY FOR LOGGED IN USER — SAME AS YOUR CODE)
-===================================== */
-
-if ($userid && isset($_POST['action'], $_POST['product_id'])) {
-
-    $pid = $_POST['product_id'];
-
-    if ($_POST['action'] === 'plus') {
-        $conn->query("UPDATE cart_items
-                      SET quantity = quantity + 1
-                      WHERE cart_id = $cartId
-                      AND product_id = $pid");
-    }
-
-    if ($_POST['action'] === 'minus') {
-        $conn->query("UPDATE cart_items
-                      SET quantity = quantity - 1
-                      WHERE cart_id = $cartId
-                      AND product_id = $pid");
-
-        $conn->query("DELETE FROM cart_items
-                      WHERE cart_id = $cartId
-                      AND product_id = $pid
-                      AND quantity <= 0");
-    }
-
-    if ($_POST['action'] === 'remove') {
-        $conn->query("DELETE FROM cart_items
-                      WHERE cart_id = $cartId
-                      AND product_id = $pid");
-    }
-
-    header("Location: cart.php");
-    exit;
-}
-
-/*----------------------------------------
-for the user as a guest
------------------------------------------*/
-
-
-if (!$userid && isset($_POST['action'], $_POST['product_id'])) {
-
-    $pid = $_POST['product_id'];
-
-    if ($_POST['action'] === 'plus') {
-
-
-        if (isset($_SESSION['cart'])) {
-            $_SESSION['cart_count']++;
-            $_SESSION['cart'][$pid] = ($_SESSION['cart'][$pid] ?? 0) + 1;
-        } else {
-            if (isset($_COOKIE['cart'])) {
-                $cart = json_decode($_COOKIE['cart'], true);
-                $cart[$pid] = ($cart[$pid] ?? 0) + 1;
-                $cart_count = $_COOKIE['cart_count'] + 1;
-                setcookie("cart_count", $cart_count, time() + (60 * 10), "/");
-                setcookie("cart", json_encode($cart), time() + (60 * 10), "/");
-            }
-        }
-    }
-
-    if ($_POST['action'] === 'minus') {
-
-        if (isset($_SESSION['cart'])) {
-
-
-            $_SESSION['cart'][$pid]--;
-            $_SESSION['cart_count']--;
-            if ($_SESSION['cart'][$pid] <= 0) {
-                unset($_SESSION['cart'][$pid]);
-            }
-        } elseif (isset($_COOKIE['cart'])) {
-
-
-            $cart = isset($_COOKIE['cart'])
-                ? json_decode($_COOKIE['cart'], true)
-                : [];
-
-            // Step 2: Decrease quantity if exists
-            if (isset($cart[$pid])) {
-
-                $cart[$pid]--;
-
-                // Step 3: Remove item if quantity <= 0
-                if ($cart[$pid] <= 0) {
-                    unset($cart[$pid]);
-                }
-
-                // Step 4: Update cart_count
-                $cart_count = isset($_COOKIE['cart_count'])
-                    ? $_COOKIE['cart_count'] - 1
-                    : 0;
-
-                if ($cart_count < 0) {
-                    $cart_count = 0;
-                }
-
-                // Step 5: Save updated values
-                setcookie("cart", json_encode($cart), time() + 60 * 10, "/");
-                setcookie("cart_count", $cart_count, time() + 60 * 10, "/");
-            }
-        }
-    }
-    if ($_POST['action'] === 'remove') {
-
-
-        if (isset($_SESSION['cart'])) {
-           
-            $_SESSION['cart_count'] -= $_SESSION['cart'][$pid];
-            unset($_SESSION['cart'][$pid]);
-        } else {
-           
-            if (isset($_COOKIE['cart'])) {
-
-                $cart = json_decode($_COOKIE['cart'], true);
-
-                if (isset($cart[$pid])) {
-
-                    unset($cart[$pid]);
-
-                    $cart_count = array_sum($cart);
-
-                    setcookie("cart", json_encode($cart), time() + 60 * 10, "/");
-                    setcookie("cart_count", $cart_count, time() + 60 * 10, "/");
-                }
-            }
-        }
-    }
-    header("Location: cart.php");
-    exit;
-}
-
-
-/* =====================================
-   STEP 4: HANDLE CHECKOUT REDIRECT
-===================================== */
+$cartManager->handleActions();
 
 if (isset($_POST['checkout'])) {
 
-    if ($userid) {
+    if ($cartManager->getUserId()) {
         header("Location: checkout.php");
     } else {
         header("Location: login.php");
     }
-
     exit;
 }
 
-
-/* =====================================
-   STEP 4: FETCH CART FOR DISPLAY
-===================================== */
-
-if ($userid && $cartId) {
-
-    $sql = "SELECT p.*, ci.quantity
-            FROM cart_items ci
-            JOIN products p ON ci.product_id = p.product_id
-            WHERE ci.cart_id = $cartId";
-
-    $result = $conn->query($sql);
-
-} elseif (!$userid && !empty($currentCart)) {
-
-    $ids = implode(",", array_keys($currentCart));
-    $sql = "SELECT * FROM products WHERE product_id IN ($ids)";
-    $result = $conn->query($sql);
-
-} else {
-    $result = null;
-}
+$result = $cartManager->fetchCart();
+$currentCart = $cartManager->getGuestCart();
+$userid = $cartManager->getUserId();
 
 $totalCount = 0;
 $grandTotal = 0;
 ?>
+
 
 <!DOCTYPE html>
 <html>
