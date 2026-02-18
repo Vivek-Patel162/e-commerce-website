@@ -1,7 +1,7 @@
 <?php
 session_start();
-require_once "../4Feb/databaseconn.php";
 include "isSessCoo.php";
+include "databaseconn.php";
 
 class CartManager
 {
@@ -124,8 +124,8 @@ class CartManager
                     $cart[$pid] = ($cart[$pid] ?? 0) + 1;
                     $cart_count = $_COOKIE['cart_count'] + 1;
 
-                    setcookie("cart_count", $cart_count, time() + 600, "/");
-                    setcookie("cart", json_encode($cart), time() + 600, "/");
+                    setcookie("cart_count", $cart_count, time() +3600, "/");
+                    setcookie("cart", json_encode($cart), time() + 3600, "/");
                 }
             }
 
@@ -139,7 +139,6 @@ class CartManager
                     if ($_SESSION['cart'][$pid] <= 0) {
                         unset($_SESSION['cart'][$pid]);
                     }
-
                 } elseif (isset($_COOKIE['cart'])) {
 
                     $cart = json_decode($_COOKIE['cart'], true);
@@ -155,8 +154,8 @@ class CartManager
                         $cart_count = $_COOKIE['cart_count'] - 1;
                         if ($cart_count < 0) $cart_count = 0;
 
-                        setcookie("cart", json_encode($cart), time() + 600, "/");
-                        setcookie("cart_count", $cart_count, time() + 600, "/");
+                        setcookie("cart", json_encode($cart), time() +3600, "/");
+                        setcookie("cart_count", $cart_count, time() +3600, "/");
                     }
                 }
             }
@@ -167,7 +166,6 @@ class CartManager
 
                     $_SESSION['cart_count'] -= $_SESSION['cart'][$pid];
                     unset($_SESSION['cart'][$pid]);
-
                 } elseif (isset($_COOKIE['cart'])) {
 
                     $cart = json_decode($_COOKIE['cart'], true);
@@ -177,8 +175,8 @@ class CartManager
                         unset($cart[$pid]);
                         $cart_count = array_sum($cart);
 
-                        setcookie("cart", json_encode($cart), time() + 600, "/");
-                        setcookie("cart_count", $cart_count, time() + 600, "/");
+                        setcookie("cart", json_encode($cart), time() + 3600, "/");
+                        setcookie("cart_count", $cart_count, time() + 3600, "/");
                     }
                 }
             }
@@ -200,7 +198,6 @@ class CartManager
                     WHERE ci.cart_id = $this->cartId";
 
             return $this->conn->query($sql);
-
         } elseif (!$this->userid && !empty($this->currentCart)) {
 
             $ids = implode(",", array_keys($this->currentCart));
@@ -244,118 +241,122 @@ $totalCount = 0;
 $grandTotal = 0;
 ?>
 
+  <?php
+    if ($userid && $status->cookieorsess() === "session") {
+        $_SESSION['cart_count'] = $totalCount;
+    } elseif ($userid) {
+        setcookie("cart_count", $totalCount, time() + 3600, "/");
+    }
+    ?>
 
 <!DOCTYPE html>
 <html>
+
 <head>
     <title>My Cart</title>
     <link rel="stylesheet" href="cart.css">
 </head>
+
 <body>
 
-<h2>My Cart</h2>
+    <h2>My Cart</h2>
 
-<?php if (!$result || $result->num_rows == 0): ?>
+    <?php if (!$result || $result->num_rows == 0): ?>
 
-    <h3>Your cart is empty</h3>
+        <h3>Your cart is empty</h3>
 
-<?php else: ?>
+    <?php else: ?>
 
-<table cellpadding="10">
-<tr>
-    <th>Image</th>
-    <th>Product</th>
-    <th>Price</th>
-    <th>Quantity</th>
-    <th>Action</th>
-    <th>Total</th>
-</tr>
+        <table cellpadding="10">
+            <tr>
+                <th>Image</th>
+                <th>Product</th>
+                <th>Price</th>
+                <th>Quantity</th>
+                <th>Action</th>
+                <th>Total</th>
+            </tr>
 
-<?php while ($row = $result->fetch_assoc()):
+            <?php while ($row = $result->fetch_assoc()):
 
-    $pid = $row['product_id'];
+                $pid = $row['product_id'];
 
-    if ($userid) {
-        $qty = $row['quantity'];
-    } else {
-        $qty = $currentCart[$pid] ?? 0;
-    }
+                if ($userid) {
+                    $qty = $row['quantity'];
+                } else {
+                    $qty = $currentCart[$pid] ?? 0;
+                }
 
-    $total = $row['price'] * $qty;
+                $total = $row['price'] * $qty;
 
-    $grandTotal += $total;
-    $totalCount += $qty;
-?>
+                $grandTotal += $total;
+                $totalCount += $qty;
+            ?>
 
-<tr>
-    <td><img src="/PracticePhp/4Feb/images/<?= $row['image'] ?>" width="80"></td>
-    <td><?= $row['product_name'] ?></td>
-    <td>₹<?= $row['price'] ?></td>
+                <tr>
+                    <td><img src="/PracticePhp/4Feb/images/<?= $row['image'] ?>" width="80"></td>
+                    <td><?= $row['product_name'] ?></td>
+                    <td>₹<?= $row['price'] ?></td>
 
-    <td>
-       
-            <form method="POST" style="display:inline;">
-                <input type="hidden" name="product_id" value="<?= $pid ?>">
-                <input type="hidden" name="action" value="minus">
-                <button>-</button>
-            </form>
-      
+                    <td>
 
-        <?= $qty ?>
+                        <form method="POST" style="display:inline;">
+                            <input type="hidden" name="product_id" value="<?= $pid ?>">
+                            <input type="hidden" name="action" value="minus">
+                            <button>-</button>
+                        </form>
 
-       
-            <form method="POST" style="display:inline;">
-                <input type="hidden" name="product_id" value="<?= $pid ?>">
-                <input type="hidden" name="action" value="plus">
-                <button>+</button>
-            </form>
-        
-    </td>
 
-    <td>
-        
-            <form method="POST">
-                <input type="hidden" name="product_id" value="<?= $pid ?>">
-                <input type="hidden" name="action" value="remove">
-                <button>Remove</button>
-            </form>
-      
-    </td>
-    
+                        <?= $qty ?>
 
-    
 
-    <td>₹<?= $total ?></td>
-</tr>
+                        <form method="POST" style="display:inline;">
+                            <input type="hidden" name="product_id" value="<?= $pid ?>">
+                            <input type="hidden" name="action" value="plus">
+                            <button>+</button>
+                        </form>
 
-<?php endwhile; ?>
+                    </td>
 
-<tr>
-    <td colspan="5"><strong>Grand Total</strong></td>
-    <td><strong>₹<?= $grandTotal ?></strong></td>
-</tr>
+                    <td>
 
-</table>
+                        <form method="POST">
+                            <input type="hidden" name="product_id" value="<?= $pid ?>">
+                            <input type="hidden" name="action" value="remove">
+                            <button>Remove</button>
+                        </form>
 
-<?php endif; ?>
+                    </td>
 
-<div class="cart-actions">
-    <a href="dashboard.php">← Continue Shopping</a>
 
-    <?php if ($result && $result->num_rows > 0): ?>
-        <form method="POST" style="display:inline;">
-            <button type="submit" name="checkout">Checkout</button>
-        </form>
+
+
+                    <td>₹<?= $total ?></td>
+                </tr>
+
+            <?php endwhile; ?>
+
+            <tr>
+                <td colspan="5"><strong>Grand Total</strong></td>
+                <td><strong>₹<?= $grandTotal ?></strong></td>
+            </tr>
+
+        </table>
+
     <?php endif; ?>
-</div>
 
-<?php
-if ($userid && $status->cookieorsess() === "session") {
-    $_SESSION['cart_count'] = $totalCount;
-} elseif ($userid) {
-    setcookie("cart_count", $totalCount, time() + 600, "/");
-}
-?>
+    <div class="cart-actions">
+        <a href="dashboard.php">← Continue Shopping</a>
+
+        <?php if ($result && $result->num_rows > 0): ?>
+            <form method="POST" style="display:inline;">
+                <button type="submit" name="checkout">Checkout</button>
+            </form>
+        <?php endif; ?>
+    </div>
+
+  
 
 </body>
+
 </html>

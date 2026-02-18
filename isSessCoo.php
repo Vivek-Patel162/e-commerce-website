@@ -22,7 +22,7 @@ class Status implements Availability
         setcookie("user", "", time() - 3600, "/");
         setcookie("userid", "", time() - 3600, "/");
         setcookie("cart", "", time() - 3600, "/");
-        setcookie("cart_count", "", time() - 3600, "/");
+      
     }
     public function unsetSession()
     {
@@ -34,9 +34,9 @@ class Status implements Availability
 
     public function setCookie($email, $name, $lastid)
     {
-        setcookie("email", $email, time() + (60 * 10), "/");
-        setcookie("user", $name, time() + (60 * 10), "/");
-        setcookie("userid", $lastid, time() + (60 * 10), "/");
+        setcookie("email", $email, time() + (3600), "/");
+        setcookie("user", $name, time() + (3600), "/");
+        setcookie("userid", $lastid, time() + (3600), "/");
     }
     public function setSession($email,$name,$userid){
     $_SESSION['email'] = $email;

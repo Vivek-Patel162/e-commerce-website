@@ -6,7 +6,7 @@ require_once  "databaseconn.php";
 if((!isset($_COOKIE['userid']))&&(!isset($_SESSION['userid'])))
 {
    
-header("Location: ".$_SERVER['HTTP_REFERER']);
+echo "user not logged in";
 exit();
 }
 $userid=0;

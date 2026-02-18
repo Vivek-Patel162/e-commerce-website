@@ -81,8 +81,8 @@ class ProductPage
                 $cart[$product_id] = ($cart[$product_id] ?? 0) + 1;
                 $cart_count = array_sum($cart);
 
-                setcookie("cart", json_encode($cart), time() + 600, "/");
-                setcookie("cart_count", $cart_count, time() + 600, "/");
+                setcookie("cart", json_encode($cart), time() +3600, "/");
+                setcookie("cart_count", $cart_count, time() +3600, "/");
 
             } else {
 

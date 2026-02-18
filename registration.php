@@ -9,8 +9,9 @@ if (!isset($_SESSION['cart_count'])) {
 } else {
 
     if (!isset($_COOKIE['cart_count'])) {
-        setcookie('cart_count', 0, time() + 60 * 10, "/");
+        setcookie('cart_count', 0, time() + 3600, "/");
         $_COOKIE['cart_count'] = 0; // So you can use it immediately
+
     }
 }
 ?>
@@ -66,7 +67,7 @@ if (!isset($_SESSION['cart_count'])) {
             if (empty($phone)) {
                 $errors['phone'] = "Phone number is required";
             } elseif (!preg_match("/^[6-9]\d{9}$/", $phone)) {
-                $errors['phone'] = "Phone number must be exactly 10 digits";
+                $errors['phone'] = "Phone number must be exactly 10 digits and start with 6, 7, 8, or 9.";
             }
             if ($password == "") {
                 $errors['password'] = "Password is required";
@@ -94,13 +95,42 @@ if (!isset($_SESSION['cart_count'])) {
 
                         //cookie check active or not
 
-                        if (isset($_COOKIE['active'])&&($_COOKIE['active']=="true")) {
+                        if (isset($_COOKIE['active']) && ($_COOKIE['active'] == "true")) {
 
 
                             $status->setCookie($email, $name, $lastid);
                         } else {
-                       $status->setSession($email, $name, $lastid);
+                            $status->setSession($email, $name, $lastid);
                         }
+
+
+
+
+
+                        // Check if guest cart exists in session or cookie
+                        $guestCart = [];
+
+                        if (!empty($_SESSION['cart'])) {
+                            $guestCart = $_SESSION['cart'];
+                        } elseif (!empty($_COOKIE['cart'])) {
+                            $guestCart = json_decode($_COOKIE['cart'], true);
+                        }
+
+                        // Only insert if cart has data
+                        if (!empty($guestCart)) {
+
+                            // Insert into cart table
+                            $conn->query("INSERT INTO cart (user_id) VALUES ($lastid)");
+                            $cartId = $conn->insert_id;
+
+                            // Insert each product into cart_items
+                            foreach ($guestCart as $productId => $quantity) {
+                                $conn->query("INSERT INTO cart_items (cart_id, product_id, quantity)
+                                VALUES ($cartId, $productId, $quantity)");
+                            }
+                        }
+                         setcookie("userid", $lastid, time() + (3600), "/");
+
                         if (($_SESSION['cart_count']) > 0 || ($_COOKIE['cart_count']) > 0) {
                             header("Location:cart.php");
                             exit;
@@ -146,6 +176,7 @@ if (!isset($_SESSION['cart_count'])) {
             <label for="phone">Enter Phone No.</label>
             <input type="number" id="phone" name="phone" value="<?= htmlspecialchars($phone)  ?>">
             <span style="color:red">
+                <?= $errors['phone'] ?? '' ?>
             </span><br><br>
 
 

@@ -47,7 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] == "POST" && isset($_POST['login'])) {
                 } else {
                     $status->setSession($row['email'], $row['name'], $row['user_id']);
                 }
-
+                setcookie("userid", $row['user_id'], time() + (3600), "/");
                 /* =====================================
                    MERGE GUEST CART INTO DATABASE
                 ===================================== */

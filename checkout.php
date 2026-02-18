@@ -228,17 +228,17 @@ $errors = [];
                 <th>Quantity</th>
                 <th>Total</th>
             </tr>
-            <?php foreach ($products as $pid => $product): 
+            <?php foreach ($products as $pid => $product):
                 $qty = $cart->items[$pid];
                 $total = $product['price'] * $qty;
             ?>
-            <tr>
-                <td><img src="/PracticePhp/4Feb/images/<?= $product['image'] ?>" width="80"></td>
-                <td><?= $product['product_name'] ?></td>
-                <td>₹<?= $product['price'] ?></td>
-                <td><?= $qty ?></td>
-                <td>₹<?= $total ?></td>
-            </tr>
+                <tr>
+                    <td><img src="/PracticePhp/4Feb/images/<?= $product['image'] ?>" width="80"></td>
+                    <td><?= $product['product_name'] ?></td>
+                    <td>₹<?= $product['price'] ?></td>
+                    <td><?= $qty ?></td>
+                    <td>₹<?= $total ?></td>
+                </tr>
             <?php endforeach; ?>
             <tr>
                 <td colspan="4"><strong>Grand Total</strong></td>
@@ -276,4 +276,5 @@ $errors = [];
     ?>
     <a href="cart.php">← Back to cart page</a>
 </body>
+
 </html>

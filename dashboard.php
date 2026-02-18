@@ -19,8 +19,30 @@ class Dashboard {
     public function __construct($conn, $status) {
         $this->conn = $conn;
         $this->status = $status;
-    }
+        if(isset($_SESSION['userid']))
+        {
+              $sql = "select * from users where user_id='".$_SESSION['userid']. "'";
+             $result = $conn->query($sql);
+             
+              if ($result && $result->num_rows > 0) {
 
+            $row = $result->fetch_assoc();
+             $_SESSION['user'] =$row['name'];
+             }
+      }else{ 
+        if(isset($_COOKIE['userid'])){
+    
+         $sql = "select * from users where user_id='".$_COOKIE['userid']. "'";
+             $result = $conn->query($sql);
+      
+              if ($result && $result->num_rows > 0) {
+
+            $row = $result->fetch_assoc();
+             setcookie("user", $row['name'], time() + (3600), "/");
+        }
+      }
+      }
+    }
     /* ===============================
        COOKIE ACCEPT / REJECT
     ================================= */
@@ -30,8 +52,8 @@ class Dashboard {
 
         if ($_POST['cookie_action'] === 'accept') {
 
-            setcookie("cookie_consent", "accepted", time() + 600, "/");
-            setcookie("active", "true", time() + 600, "/");
+            setcookie("cookie_consent", "accepted", time() +3600, "/");
+            setcookie("active", "true", time() +3600, "/");
 
             if (!empty($_SESSION['cart'])) {
 
@@ -51,8 +73,8 @@ class Dashboard {
 
                 $cart_count = array_sum($cookieCart);
 
-                setcookie("cart", json_encode($cookieCart), time() + 600, "/");
-                setcookie("cart_count", $cart_count, time() + 600, "/");
+                setcookie("cart", json_encode($cookieCart), time() +3600, "/");
+                setcookie("cart_count", $cart_count, time() +3600, "/");
 
                 unset($_SESSION['cart']);
                 unset($_SESSION['cart_count']);
@@ -61,8 +83,8 @@ class Dashboard {
 
         if ($_POST['cookie_action'] === 'reject') {
 
-            setcookie("cookie_consent", "rejected", time() + 600, "/");
-            setcookie("active", "false", time() + 600, "/");
+            setcookie("cookie_consent", "rejected", time() +3600, "/");
+            setcookie("active", "false", time() +3600, "/");
 
             setcookie("cart", "", time() - 3600, "/");
             setcookie("cart_count", "", time() - 3600, "/");
@@ -87,7 +109,7 @@ class Dashboard {
             $this->status->unsetCookie();
             $this->status->unsetSession();
 
-            setcookie("cookie_consent", "", time() - 3600, "/");
+           
             setcookie("active", "", time() - 3600, "/");
             setcookie("cart", "", time() - 3600, "/");
             setcookie("cart_count", "", time() - 3600, "/");
@@ -153,8 +175,8 @@ class Dashboard {
                 $cart[$product_id] = ($cart[$product_id] ?? 0) + 1;
                 $cart_count = array_sum($cart);
 
-                setcookie("cart", json_encode($cart), time() + 600, "/");
-                setcookie("cart_count", $cart_count, time() + 600, "/");
+                setcookie("cart", json_encode($cart), time() +3600, "/");
+                setcookie("cart_count", $cart_count, time() +3600, "/");
             } else {
 
                 if (!isset($_SESSION['cart'])) {
